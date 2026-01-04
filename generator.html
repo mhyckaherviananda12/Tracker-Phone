@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Link Generator</title>
+    <style>
+        body { font-family: sans-serif; padding: 40px; background: #f4f4f4; text-align: center; }
+        .container { background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        input { width: 80%; padding: 12px; margin: 15px 0; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; }
+        button { background: #28a745; color: white; border: none; padding: 12px 25px; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #218838; }
+        #result { margin-top: 20px; padding: 15px; background: #e9ecef; border-radius: 5px; word-break: break-all; display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🔗 Generator Link</h2>
+        <p>Masukkan nama target untuk membuat link pelacak.</p>
+        <input type="text" id="targetId" placeholder="Misal: target-01">
+        <br>
+        <button onclick="generate()">Buat Link</button>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        function generate() {
+            const id = document.getElementById('targetId').value.trim();
+            if (!id) return alert("Wajib isi ID/Nama target!");
+
+            // Otomatis deteksi URL saat ini
+            let baseUrl = window.location.href;
+            baseUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/')) + '/index.html';
+            
+            const finalLink = `${baseUrl}?id=${encodeURIComponent(id)}`;
+
+            const resDiv = document.getElementById('result');
+            resDiv.style.display = 'block';
+            resDiv.innerHTML = `
+                <strong>Copy link ini:</strong><br><br>
+                <a href="${finalLink}" target="_blank" style="color:#007bff; text-decoration:none;">${finalLink}</a>
+            `;
+        }
+    </script>
+</body>
+</html>
