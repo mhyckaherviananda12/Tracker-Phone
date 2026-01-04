@@ -3,110 +3,166 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live Dashboard</title>
+    <title>Master Dashboard</title>
+    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
     <style>
-        body { margin: 0; display: flex; height: 100vh; font-family: monospace; overflow: hidden; }
-        #sidebar { width: 320px; background: #111; color: #0f0; display: flex; flex-direction: column; border-right: 1px solid #333; }
-        #header { padding: 15px; border-bottom: 1px solid #333; background: #000; }
+        body { margin: 0; display: flex; height: 100vh; font-family: monospace; background: #111; color: #fff; overflow: hidden; }
+        #sidebar { width: 350px; display: flex; flex-direction: column; border-right: 1px solid #333; background: #1a1a1a; z-index: 2; }
+        #header { padding: 15px; background: #000; border-bottom: 1px solid #333; }
         #logList { flex: 1; overflow-y: auto; padding: 10px; }
-        #map { flex: 1; height: 100%; background: #222; }
-        .log-item { background: #222; margin-bottom: 8px; padding: 10px; border-left: 3px solid #555; cursor: pointer; font-size: 11px; line-height: 1.4; }
+        #map { flex: 1; height: 100%; z-index: 1; }
+        
+        .log-item { background: #222; margin-bottom: 8px; padding: 12px; border-left: 4px solid #555; cursor: pointer; font-size: 11px; transition: 0.2s; }
         .log-item:hover { background: #333; }
-        .status-ALLOWED { border-left-color: #00ff00; }
-        .status-DENIED { border-left-color: #ff0000; }
-        .time { color: #888; font-size: 10px; margin-bottom: 3px; }
+        
+        /* Status Colors */
+        .gps-mode { border-left-color: #00ff00; } /* Hijau untuk GPS */
+        .ip-mode { border-left-color: #ff9900; }  /* Oranye untuk IP */
+        
+        .badge { padding: 2px 6px; border-radius: 4px; font-weight: bold; color: #000; display: inline-block; margin-bottom: 5px; }
+        .bg-gps { background: #00ff00; }
+        .bg-ip { background: #ff9900; }
+        
+        h3 { margin: 0 0 5px 0; color: #fff; }
+        p { margin: 0; color: #aaa; font-size: 12px; }
     </style>
 </head>
 <body>
 
 <div id="sidebar">
     <div id="header">
-        <h3>TRACKING MONITOR</h3>
-        <small>Menunggu data...</small>
+        <h3>RADAR MONITOR</h3>
+        <p>Live Tracking System</p>
     </div>
     <div id="logList"></div>
 </div>
 <div id="map"></div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="config.js"></script>
 <script>
-    // Init Map
-    const map = L.map('map').setView([-2.5489, 118.0149], 5); // Center Indonesia
+    // 1. Setup Map
+    const map = L.map('map').setView([-2.5489, 118.0149], 5); // Default Indonesia
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap'
+        attribution: '© OpenStreetMap | System by Gemini'
     }).addTo(map);
 
     const markers = {};
     const processedLogs = new Set();
 
+    // 2. Custom Icons
+    const iconGps = L.icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34]
+    });
+
+    const iconIp = L.icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png',
+        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34]
+    });
+
+    // 3. Listen to Firebase
     database.ref('logs').on('child_added', (userSnap) => {
         const userId = userSnap.key;
         
-        userSnap.forEach((logSnap) => {
-            const logId = logSnap.key;
+        // Listen detail per user
+        database.ref('logs/' + userId).limitToLast(1).on('child_added', (snapshot) => {
+            const logId = snapshot.key;
             if (processedLogs.has(logId)) return;
             processedLogs.add(logId);
             
-            const log = logSnap.val();
-            addLogItem(userId, log);
-
-            if (log.status === 'ALLOWED' && log.location && log.location.latitude) {
-                updateMarker(userId, log);
-            }
-        });
-
-        // Listen for new entries on this user
-        database.ref('logs/' + userId).on('child_added', (newLogSnap) => {
-            if (processedLogs.has(newLogSnap.key)) return;
-            processedLogs.add(newLogSnap.key);
-            
-            const log = newLogSnap.val();
-            addLogItem(userId, log);
-            if (log.status === 'ALLOWED' && log.location) updateMarker(userId, log);
+            processLogData(userId, snapshot.val());
         });
     });
 
-    function updateMarker(userId, log) {
-        const lat = log.location.latitude;
-        const lng = log.location.longitude;
-        const msg = `<b>${userId}</b><br>IP: ${log.ip}<br>Device: ${log.device.platform}`;
+    // 4. Logic Pemroses Data
+    async function processLogData(userId, log) {
+        let finalLat, finalLng, type, accuracyInfo;
 
-        if (markers[userId]) {
-            markers[userId].setLatLng([lat, lng]).setPopupContent(msg).openPopup();
+        // CEK 1: Apakah ada data GPS akurat?
+        if (log.location && log.location.latitude) {
+            finalLat = log.location.latitude;
+            finalLng = log.location.longitude;
+            type = 'GPS';
+            accuracyInfo = `Akurasi: ${Math.round(log.location.accuracy)} meter`;
+            
+            // Langsung render jika GPS
+            renderMarkerAndLog(userId, log, finalLat, finalLng, type, accuracyInfo);
+        
         } else {
-            markers[userId] = L.marker([lat, lng]).addTo(map).bindPopup(msg).openPopup();
+            // CEK 2: Jika tidak ada GPS, gunakan IP Address (Fallback)
+            type = 'IP_ESTIMATE';
+            accuracyInfo = "⚠️ Perkiraan Kota (Tidak Akurat)";
+            
+            // Kita harus fetch koordinat dari IP-nya
+            try {
+                const res = await fetch(`https://ipwho.is/${log.ip}`);
+                const data = await res.json();
+                
+                if(data.success) {
+                    finalLat = data.latitude;
+                    finalLng = data.longitude;
+                    renderMarkerAndLog(userId, log, finalLat, finalLng, type, accuracyInfo);
+                } else {
+                    console.log("Gagal convert IP ke Lokasi");
+                }
+            } catch (e) {
+                console.error("Error IP API:", e);
+            }
         }
-        map.flyTo([lat, lng], 16);
     }
 
-    function addLogItem(userId, log) {
-        const div = document.createElement('div');
-        div.className = `log-item status-${log.status}`;
+    // 5. Render ke Layar
+    function renderMarkerAndLog(userId, log, lat, lng, type, accInfo) {
+        // A. Update Marker di Peta
+        const isGps = type === 'GPS';
+        const usedIcon = isGps ? iconGps : iconIp;
+        const statusBadge = isGps ? '<span class="badge bg-gps">GPS AKURAT</span>' : '<span class="badge bg-ip">IP LOCATION</span>';
+
+        const popupContent = `
+            <b>ID: ${userId}</b><br>
+            ${statusBadge}<br>
+            IP: ${log.ip}<br>
+            Device: ${log.device.platform}<br>
+            ${accInfo}
+        `;
+
+        if (markers[userId]) {
+            markers[userId].setLatLng([lat, lng]).setIcon(usedIcon).setPopupContent(popupContent).openPopup();
+        } else {
+            markers[userId] = L.marker([lat, lng], {icon: usedIcon}).addTo(map).bindPopup(popupContent).openPopup();
+        }
         
-        const time = new Date(log.timestamp).toLocaleTimeString();
-        let detail = log.status;
-        if (log.status === 'ALLOWED') detail = `📍 GPS ACCURATE`;
-        
-        div.innerHTML = `
-            <div class="time">[${time}] ID: ${userId}</div>
-            <div style="color: white; font-weight: bold;">${detail}</div>
-            <div>IP: ${log.ip}</div>
-            <div style="color: #aaa;">${log.device.platform}</div>
+        // Auto Zoom ke target terbaru
+        map.flyTo([lat, lng], 15);
+
+        // B. Update List di Kiri
+        const list = document.getElementById('logList');
+        const item = document.createElement('div');
+        item.className = `log-item ${isGps ? 'gps-mode' : 'ip-mode'}`;
+        item.innerHTML = `
+            <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                <strong>${userId}</strong>
+                <span style="color:#888;">${new Date(log.timestamp).toLocaleTimeString()}</span>
+            </div>
+            ${statusBadge}
+            <div style="margin-top:5px; color:#ccc;">IP: ${log.ip}</div>
+            <div style="color:#888; font-size:10px;">${log.device.userAgent.substring(0, 30)}...</div>
         `;
         
-        div.onclick = () => {
-            if(log.status === 'ALLOWED' && log.location) {
-                map.flyTo([log.location.latitude, log.location.longitude], 18);
-            }
+        item.onclick = () => {
+            map.flyTo([lat, lng], 17);
+            markers[userId].openPopup();
         };
 
-        const list = document.getElementById('logList');
-        list.insertBefore(div, list.firstChild);
+        list.insertBefore(item, list.firstChild);
     }
 </script>
 </body>
 </html>
+
