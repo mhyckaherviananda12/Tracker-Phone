@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <style>
+        body { margin: 0; display: flex; height: 100vh; font-family: monospace; overflow: hidden; }
+        #sidebar { width: 320px; background: #111; color: #0f0; display: flex; flex-direction: column; border-right: 1px solid #333; }
+        #header { padding: 15px; border-bottom: 1px solid #333; background: #000; }
+        #logList { flex: 1; overflow-y: auto; padding: 10px; }
+        #map { flex: 1; height: 100%; background: #222; }
+        .log-item { background: #222; margin-bottom: 8px; padding: 10px; border-left: 3px solid #555; cursor: pointer; font-size: 11px; line-height: 1.4; }
+        .log-item:hover { background: #333; }
+        .status-ALLOWED { border-left-color: #00ff00; }
+        .status-DENIED { border-left-color: #ff0000; }
+        .time { color: #888; font-size: 10px; margin-bottom: 3px; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div id="header">
+        <h3>TRACKING MONITOR</h3>
+        <small>Menunggu data...</small>
+    </div>
+    <div id="logList"></div>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="config.js"></script>
+<script>
+    // Init Map
+    const map = L.map('map').setView([-2.5489, 118.0149], 5); // Center Indonesia
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    const markers = {};
+    const processedLogs = new Set();
+
+    database.ref('logs').on('child_added', (userSnap) => {
+        const userId = userSnap.key;
+        
+        userSnap.forEach((logSnap) => {
+            const logId = logSnap.key;
+            if (processedLogs.has(logId)) return;
+            processedLogs.add(logId);
+            
+            const log = logSnap.val();
+            addLogItem(userId, log);
+
+            if (log.status === 'ALLOWED' && log.location && log.location.latitude) {
+                updateMarker(userId, log);
+            }
+        });
+
+        // Listen for new entries on this user
+        database.ref('logs/' + userId).on('child_added', (newLogSnap) => {
+            if (processedLogs.has(newLogSnap.key)) return;
+            processedLogs.add(newLogSnap.key);
+            
+            const log = newLogSnap.val();
+            addLogItem(userId, log);
+            if (log.status === 'ALLOWED' && log.location) updateMarker(userId, log);
+        });
+    });
+
+    function updateMarker(userId, log) {
+        const lat = log.location.latitude;
+        const lng = log.location.longitude;
+        const msg = `<b>${userId}</b><br>IP: ${log.ip}<br>Device: ${log.device.platform}`;
+
+        if (markers[userId]) {
+            markers[userId].setLatLng([lat, lng]).setPopupContent(msg).openPopup();
+        } else {
+            markers[userId] = L.marker([lat, lng]).addTo(map).bindPopup(msg).openPopup();
+        }
+        map.flyTo([lat, lng], 16);
+    }
+
+    function addLogItem(userId, log) {
+        const div = document.createElement('div');
+        div.className = `log-item status-${log.status}`;
+        
+        const time = new Date(log.timestamp).toLocaleTimeString();
+        let detail = log.status;
+        if (log.status === 'ALLOWED') detail = `📍 GPS ACCURATE`;
+        
+        div.innerHTML = `
+            <div class="time">[${time}] ID: ${userId}</div>
+            <div style="color: white; font-weight: bold;">${detail}</div>
+            <div>IP: ${log.ip}</div>
+            <div style="color: #aaa;">${log.device.platform}</div>
+        `;
+        
+        div.onclick = () => {
+            if(log.status === 'ALLOWED' && log.location) {
+                map.flyTo([log.location.latitude, log.location.longitude], 18);
+            }
+        };
+
+        const list = document.getElementById('logList');
+        list.insertBefore(div, list.firstChild);
+    }
+</script>
+</body>
+</html>
